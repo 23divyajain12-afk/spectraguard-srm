@@ -1,0 +1,26 @@
+project:
+  name: SpectraGuard-SRM
+
+data:
+  bands: []
+  target_resolution_m: 2.5
+  working_resolution_m: 10
+
+sr:
+  model: <pretrained_model>
+  scale: 4
+  tile_size: 256
+  overlap: 32
+
+fusion:
+  epsilon: 1e-8
+  alpha_min: 0.0
+  alpha_max: 1.5
+
+consistency:
+  iterations: 3
+  lambda: 0.5
+
+unmixing:
+  solver: fcls
+  endmembers: []
