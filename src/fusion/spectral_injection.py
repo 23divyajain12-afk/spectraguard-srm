@@ -35,6 +35,7 @@ def fuse_multispectral(
         )
     alpha = np.clip(alpha, config.fusion.alpha_min, config.fusion.alpha_max)
     data = bicubic_cube.data + alpha[:, None, None] * detail[None, ...]
+    data[:, ~bicubic_cube.mask] = bicubic_cube.data[:, ~bicubic_cube.mask]
     data = np.clip(data, 0.0, 1.0).astype(np.float32)
     alpha_map = np.broadcast_to(alpha[:, None, None], data.shape).copy()
     return FusedCube(

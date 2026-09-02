@@ -26,6 +26,8 @@ def preprocess(cube: SentinelCube, config: RunConfig) -> SentinelCube:
     """Align bands to the configured working grid and merge quality masks."""
     if cube.data.ndim != 3 or cube.mask.shape != cube.data.shape[1:]:
         raise ValueError("SentinelCube has inconsistent data and mask shapes")
+    if cube.data.shape[0] == 0 or cube.data.shape[1] == 0 or cube.data.shape[2] == 0:
+        raise ValueError("SentinelCube data cannot have zero-sized dimensions or shapes")
     if cube.resolution_m <= 0 or config.data.working_resolution_m <= 0:
         raise ValueError("Raster resolutions must be positive")
 

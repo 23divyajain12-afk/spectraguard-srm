@@ -29,6 +29,10 @@ def prepare_endmembers(
         wavelengths, reflectance = wavelengths[order], reflectance[order]
         if np.any(np.diff(wavelengths) <= 0):
             raise ValueError(f"Spectrum wavelengths must be strictly increasing: {spectrum.name}")
+        if wavelengths[0] > grid[0] or wavelengths[-1] < grid[-1]:
+            raise ValueError(
+                f"Spectrum does not cover the sensor wavelength grid: {spectrum.name}"
+            )
         interpolated = np.interp(grid, wavelengths, np.clip(reflectance, 0.0, 1.0))
         values = []
         for band in sensor_response.band_names:
