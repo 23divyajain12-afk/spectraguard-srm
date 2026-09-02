@@ -15,6 +15,7 @@ class DataConfig:
     bands: List[str]
     target_resolution_m: float
     working_resolution_m: float
+    scene_path: str = ""
 
 
 @dataclass

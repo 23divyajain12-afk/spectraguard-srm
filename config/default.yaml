@@ -5,6 +5,7 @@ data:
   bands: []
   target_resolution_m: 2.5
   working_resolution_m: 10
+  scene_path: tests/fixtures/aoi_small.npz
 
 sr:
   model: <pretrained_model>
