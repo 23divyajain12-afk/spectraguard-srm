@@ -6,9 +6,10 @@ data:
   target_resolution_m: 2.5
   working_resolution_m: 10
   scene_path: tests/fixtures/aoi_small.npz
+  aoi:
 
 sr:
-  model: <pretrained_model>
+  model: numpy_baseline
   scale: 4
   tile_size: 256
   overlap: 32
@@ -25,3 +26,4 @@ consistency:
 unmixing:
   solver: fcls
   endmembers: []
+  sensor_response: ""

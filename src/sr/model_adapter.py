@@ -44,4 +44,9 @@ def load_sr_model(config: RunConfig) -> SRModel:
     """Load the configured replaceable SR model adapter."""
     if not config.sr.model:
         raise ValueError("SR model name must not be empty")
+    if config.sr.model not in {"numpy_baseline", "numpy_interpolation"}:
+        raise ValueError(
+            f"SR model backend '{config.sr.model}' is unavailable; "
+            "add its adapter and weights, or select 'numpy_baseline'"
+        )
     return NumpyInterpolationModel(config.sr.scale, config.sr.model)

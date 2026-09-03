@@ -9,13 +9,16 @@ import numpy as np
 
 from src.consistency.projection import project_to_measurement_consistency
 from src.core.config import RunConfig, load_config
-from src.core.schemas import EndmemberSet, FusedCube, RunMetadata, SentinelCube
+from src.core.schemas import EndmemberSet, FusedCube, RawSpectrum, RunMetadata, SentinelCube
 from src.data.geospatial import crop_to_aoi, reproject_match
 from src.data.preprocessing import preprocess
 from src.data.sentinel_io import load_sentinel
 from src.fusion.bicubic import bicubic_upscale
 from src.fusion.detail_residual import extract_residual
 from src.fusion.spectral_injection import fuse_multispectral, run_safety_checks
+from src.library.endmember_preparation import prepare_endmembers
+from src.library.sensor_response import load_sensor_response
+from src.library.usgs_io import load_usgs_spectrum
 from src.sr.model_adapter import load_sr_model
 from src.sr.spatial_representation import build_spatial_input
 from src.sr.tiling import tiled_inference
@@ -28,7 +31,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = REPOSITORY_ROOT / "data" / "outputs"
 
 
-def _load_scene_endmembers(path: Path) -> EndmemberSet:
+def _load_fixture_endmembers(path: Path) -> EndmemberSet:
     with np.load(path, allow_pickle=False) as values:
         required = {"endmember_A", "endmember_names", "material_classes", "source_spectra"}
         missing = required.difference(values.files)
@@ -42,13 +45,35 @@ def _load_scene_endmembers(path: Path) -> EndmemberSet:
         )
 
 
+def _load_endmembers(config: RunConfig, scene_path: Path) -> EndmemberSet:
+    if config.unmixing.endmembers:
+        if not config.unmixing.sensor_response:
+            raise ValueError(
+                "unmixing.sensor_response must be configured with spectral endmembers"
+            )
+        spectra: list[RawSpectrum] = [
+            load_usgs_spectrum(path) for path in config.unmixing.endmembers
+        ]
+        response = load_sensor_response(
+            config.unmixing.sensor_response,
+            list(config.data.bands) or ["B02", "B03", "B04", "B08", "B11"],
+        )
+        return prepare_endmembers(spectra, response, config)
+    if scene_path.suffix.lower() == ".npz":
+        return _load_fixture_endmembers(scene_path)
+    raise ValueError(
+        "No spectral endmembers configured. Set unmixing.endmembers and "
+        "unmixing.sensor_response for SAFE scenes."
+    )
+
+
 def _configured_scene_path(config: RunConfig) -> Path:
     if not config.data.scene_path:
         raise ValueError("data.scene_path must identify a Sentinel scene")
     scene_path = Path(config.data.scene_path)
     if not scene_path.is_absolute():
         scene_path = (Path.cwd() / scene_path).resolve()
-    if not scene_path.is_file():
+    if not scene_path.is_file() and not scene_path.is_dir():
         raise FileNotFoundError(f"Configured Sentinel scene does not exist: {scene_path}")
     return scene_path
 
@@ -121,7 +146,9 @@ def _run_pipeline(
     output_root: Path,
     fcls_sample_limit: Optional[int] = None,
 ) -> RunMetadata:
-    original = _align_configured_geometry(load_sentinel(str(scene_path), config))
+    aoi = config.data.aoi.as_bbox() if config.data.aoi is not None else None
+    original = load_sentinel(str(scene_path), config, aoi_bbox=aoi)
+    original = _align_configured_geometry(original)
     original = preprocess(original, config)
     bicubic = bicubic_upscale(original, config.sr.scale)
 
@@ -154,6 +181,19 @@ def _run_pipeline(
     _save_cube(original, output_root / "validation" / "original.npz")
     _save_cube(bicubic, output_root / "bicubic" / "bicubic.npz")
     _save_cube(fused, output_root / "fused" / "fused.npz")
+    output_root.joinpath("sr").mkdir(parents=True, exist_ok=True)
+    np.savez(
+        output_root / "sr" / "spatial_prediction.npz",
+        data=spatial_hr,
+        transform=np.asarray(bicubic.transform),
+        crs=np.asarray(bicubic.crs),
+        bounds=np.asarray(bicubic.bounds),
+        resolution_m=np.asarray(bicubic.resolution_m),
+        mask=bicubic.mask,
+        source_bands=np.asarray(spatial_input.source_bands),
+        method=np.asarray(spatial_input.method),
+        model=np.asarray(config.sr.model),
+    )
     output_root.joinpath("validation").mkdir(parents=True, exist_ok=True)
     output_root.joinpath("uncertainty").mkdir(parents=True, exist_ok=True)
     output_root.joinpath("abundance").mkdir(parents=True, exist_ok=True)
@@ -165,6 +205,21 @@ def _run_pipeline(
         band_names=np.asarray(list(metrics.per_band_rmse)),
         sam_mean=np.asarray(metrics.sam_mean),
         reference_type=np.asarray(metrics.reference_type),
+    )
+    (output_root / "validation" / "metrics.json").write_text(
+        json.dumps(
+            {
+                "sam_mean": metrics.sam_mean,
+                "per_band_rmse": metrics.per_band_rmse,
+                "per_band_mae": metrics.per_band_mae,
+                "psnr": metrics.psnr,
+                "ssim": metrics.ssim,
+                "ergas": metrics.ergas,
+                "reference_type": metrics.reference_type,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
     )
     np.savez(
         output_root / "uncertainty" / "uncertainty.npz",
@@ -212,7 +267,7 @@ def run_pipeline(config: RunConfig) -> RunMetadata:
     if not isinstance(config, RunConfig):
         raise TypeError("config must be a RunConfig")
     scene_path = _configured_scene_path(config)
-    endmembers = _load_scene_endmembers(scene_path)
+    endmembers = _load_endmembers(config, scene_path)
     return _run_pipeline(config, scene_path, endmembers, OUTPUT_ROOT)
 
 
@@ -223,7 +278,7 @@ if __name__ == "__main__":
     _run_pipeline(
         configuration,
         scene_path,
-        _load_scene_endmembers(scene_path),
+        _load_endmembers(configuration, scene_path),
         OUTPUT_ROOT,
         fcls_sample_limit=256,
     )

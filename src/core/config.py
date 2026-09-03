@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import yaml
 
@@ -11,11 +11,23 @@ class ProjectConfig:
 
 
 @dataclass
+class AOIConfig:
+    minx: float
+    miny: float
+    maxx: float
+    maxy: float
+
+    def as_bbox(self) -> tuple[float, float, float, float]:
+        return (self.minx, self.miny, self.maxx, self.maxy)
+
+
+@dataclass
 class DataConfig:
     bands: List[str]
     target_resolution_m: float
     working_resolution_m: float
     scene_path: str = ""
+    aoi: Optional[AOIConfig] = None
 
 
 @dataclass
@@ -43,6 +55,7 @@ class ConsistencyConfig:
 class UnmixingConfig:
     solver: str
     endmembers: List[str]
+    sensor_response: str = ""
 
 
 @dataclass
@@ -62,7 +75,17 @@ def load_config(path: str) -> RunConfig:
 
     return RunConfig(
         project=ProjectConfig(**values["project"]),
-        data=DataConfig(**values["data"]),
+        data=DataConfig(
+            bands=values["data"]["bands"],
+            target_resolution_m=values["data"]["target_resolution_m"],
+            working_resolution_m=values["data"]["working_resolution_m"],
+            scene_path=values["data"].get("scene_path", ""),
+            aoi=(
+                AOIConfig(**values["data"]["aoi"])
+                if values["data"].get("aoi") is not None
+                else None
+            ),
+        ),
         sr=SRConfig(**values["sr"]),
         fusion=FusionConfig(
             epsilon=float(values["fusion"]["epsilon"]),
