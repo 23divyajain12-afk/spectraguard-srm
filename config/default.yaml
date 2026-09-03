@@ -2,17 +2,24 @@ project:
   name: SpectraGuard-SRM
 
 data:
-  bands: []
+  bands: [B02, B03, B04, B08, B11]
   target_resolution_m: 2.5
   working_resolution_m: 10
-  scene_path: tests/fixtures/aoi_small.npz
+  scene_path: data/raw/S2C_MSIL2A_20260831T052641_N0512_R105_T43QCA_20260831T102215.SAFE
   aoi:
+    minx: 300000
+    miny: 2094880
+    maxx: 305120
+    maxy: 2100000
 
 sr:
-  model: numpy_baseline
+  model: sen2sr
   scale: 4
   tile_size: 256
   overlap: 32
+  device: auto
+  checkpoint: opensr-ldsrs2_v1_0_0.ckpt
+  sampling_steps: 100
 
 fusion:
   epsilon: 1e-8

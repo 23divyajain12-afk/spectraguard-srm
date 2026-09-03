@@ -38,3 +38,20 @@ def test_run_pipeline_rejects_missing_scene_path():
 def test_fixture_smoke_entrypoint_runs():
     config = load_config(str(REPOSITORY_ROOT / "config" / "default.yaml"))
     assert config.data.scene_path == "tests/fixtures/aoi_small.npz"
+
+
+def test_safe_without_unmixing_configuration_skips_unmixing(monkeypatch, tmp_path):
+    safe_path = tmp_path / "scene.SAFE"
+    safe_path.mkdir()
+    config = load_config(str(REPOSITORY_ROOT / "config" / "default.yaml"))
+    config = replace(config, data=replace(config.data, scene_path=str(safe_path)))
+    captured = {}
+
+    def fake_run_pipeline(config, scene_path, endmembers, output_root):
+        captured["endmembers"] = endmembers
+        return object()
+
+    monkeypatch.setattr(orchestrator, "_run_pipeline", fake_run_pipeline)
+    orchestrator.run_pipeline(config)
+
+    assert captured["endmembers"] is None

@@ -1,4 +1,5 @@
 import json
+import logging
 import sys
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -27,6 +28,8 @@ from src.validation.metrics import evaluate
 from src.validation.uncertainty import estimate_uncertainty
 
 
+LOGGER = logging.getLogger(__name__)
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = REPOSITORY_ROOT / "data" / "outputs"
 
@@ -45,7 +48,13 @@ def _load_fixture_endmembers(path: Path) -> EndmemberSet:
         )
 
 
-def _load_endmembers(config: RunConfig, scene_path: Path) -> EndmemberSet:
+def _load_endmembers(
+    config: RunConfig, scene_path: Path
+) -> Optional[EndmemberSet]:
+    if config.unmixing.sensor_response and not config.unmixing.endmembers:
+        raise ValueError(
+            "unmixing.endmembers must be configured with unmixing.sensor_response"
+        )
     if config.unmixing.endmembers:
         if not config.unmixing.sensor_response:
             raise ValueError(
@@ -61,10 +70,7 @@ def _load_endmembers(config: RunConfig, scene_path: Path) -> EndmemberSet:
         return prepare_endmembers(spectra, response, config)
     if scene_path.suffix.lower() == ".npz":
         return _load_fixture_endmembers(scene_path)
-    raise ValueError(
-        "No spectral endmembers configured. Set unmixing.endmembers and "
-        "unmixing.sensor_response for SAFE scenes."
-    )
+    return None
 
 
 def _configured_scene_path(config: RunConfig) -> Path:
@@ -139,10 +145,30 @@ def _make_fused_cube(cube: FusedCube, provenance: str) -> FusedCube:
     )
 
 
+def _select_rgb_nir_cube(cube: SentinelCube) -> SentinelCube:
+    required = ["B02", "B03", "B04", "B08"]
+    missing = [band for band in required if band not in cube.band_names]
+    if missing:
+        raise ValueError(f"SEN2SR source cube is missing bands: {missing}")
+    indices = [cube.band_names.index(band) for band in required]
+    return SentinelCube(
+        data=cube.data[indices].copy(),
+        band_names=required,
+        crs=cube.crs,
+        transform=cube.transform,
+        resolution_m=cube.resolution_m,
+        bounds=cube.bounds,
+        mask=cube.mask.copy(),
+        nodata=cube.nodata,
+        acquisition_time=cube.acquisition_time,
+        meta={**cube.meta, "source_bands": required, "b11_processed_by_sen2sr": False},
+    )
+
+
 def _run_pipeline(
     config: RunConfig,
     scene_path: Path,
-    endmembers: EndmemberSet,
+    endmembers: Optional[EndmemberSet],
     output_root: Path,
     fcls_sample_limit: Optional[int] = None,
 ) -> RunMetadata:
@@ -150,33 +176,72 @@ def _run_pipeline(
     original = load_sentinel(str(scene_path), config, aoi_bbox=aoi)
     original = _align_configured_geometry(original)
     original = preprocess(original, config)
-    bicubic = bicubic_upscale(original, config.sr.scale)
+    model_input_cube = (
+        _select_rgb_nir_cube(original)
+        if config.sr.model == "sen2sr"
+        else original
+    )
+    bicubic = bicubic_upscale(model_input_cube, config.sr.scale)
 
     spatial_input = build_spatial_input(original, config)
     model = load_sr_model(config)
     spatial_hr = tiled_inference(
         model, spatial_input.array, config.sr.tile_size, config.sr.overlap
     )
-    spatial_base = np.mean(bicubic.data[: spatial_hr.shape[0]], axis=0)
-    spatial_hr_channel = np.mean(spatial_hr, axis=0)
-    residual = extract_residual(spatial_hr_channel, spatial_base)
-
-    fused = fuse_multispectral(bicubic, spatial_base, spatial_hr_channel, config)
-    fused = run_safety_checks(fused, config)
-    fused = _make_fused_cube(fused, f"{residual.model_name}+{fused.provenance}")
-    fused = project_to_measurement_consistency(fused, original, config)
-    metrics = evaluate(fused, original, None, config)
+    if config.sr.model == "sen2sr":
+        residual = extract_residual(spatial_hr, bicubic.data)
+        fused = FusedCube(
+            data=spatial_hr,
+            band_names=list(model_input_cube.band_names),
+            crs=bicubic.crs,
+            transform=bicubic.transform,
+            resolution_m=bicubic.resolution_m,
+            bounds=bicubic.bounds,
+            mask=bicubic.mask.copy(),
+            nodata=bicubic.nodata,
+            acquisition_time=bicubic.acquisition_time,
+            meta={
+                **bicubic.meta,
+                "source_bands": list(model_input_cube.band_names),
+                "b11_processed_by_sen2sr": False,
+            },
+            alpha_map=None,
+            provenance="sen2sr_rgb_nir",
+            anomaly_mask=None,
+        )
+        fused = run_safety_checks(fused, config)
+        validation_cube = model_input_cube
+    else:
+        spatial_base = np.mean(bicubic.data[: spatial_hr.shape[0]], axis=0)
+        spatial_hr_channel = np.mean(spatial_hr, axis=0)
+        residual = extract_residual(spatial_hr_channel, spatial_base)
+        fused = fuse_multispectral(bicubic, spatial_base, spatial_hr_channel, config)
+        fused = run_safety_checks(fused, config)
+        fused = _make_fused_cube(
+            fused,
+            f"{getattr(model, 'model_name', config.sr.model)}+{fused.provenance}",
+        )
+        validation_cube = original
+    fused = project_to_measurement_consistency(fused, validation_cube, config)
+    metrics = evaluate(fused, validation_cube, None, config)
     uncertainty = estimate_uncertainty(fused, metrics, config)
 
-    fcls_cube = fused
     sample_count = None
-    if fcls_sample_limit is not None:
-        valid_rows, valid_cols = np.where(fused.mask)
-        sample_count = min(fcls_sample_limit, len(valid_rows))
-        sample_mask = np.zeros_like(fused.mask, dtype=bool)
-        sample_mask[valid_rows[:sample_count], valid_cols[:sample_count]] = True
-        fcls_cube = replace(fused, mask=sample_mask)
-    abundance = fcls(fcls_cube, endmembers, config)
+    abundance = None
+    if endmembers is not None:
+        fcls_cube = fused
+        if fcls_sample_limit is not None:
+            valid_rows, valid_cols = np.where(fused.mask)
+            sample_count = min(fcls_sample_limit, len(valid_rows))
+            sample_mask = np.zeros_like(fused.mask, dtype=bool)
+            sample_mask[valid_rows[:sample_count], valid_cols[:sample_count]] = True
+            fcls_cube = replace(fused, mask=sample_mask)
+        abundance = fcls(fcls_cube, endmembers, config)
+    else:
+        LOGGER.warning(
+            "Skipping FCLS unmixing: no endmember and sensor-response "
+            "configuration is provided."
+        )
 
     _save_cube(original, output_root / "validation" / "original.npz")
     _save_cube(bicubic, output_root / "bicubic" / "bicubic.npz")
@@ -192,7 +257,10 @@ def _run_pipeline(
         mask=bicubic.mask,
         source_bands=np.asarray(spatial_input.source_bands),
         method=np.asarray(spatial_input.method),
-        model=np.asarray(config.sr.model),
+        model=np.asarray(getattr(model, "model_name", config.sr.model)),
+        model_version=np.asarray(getattr(model, "model_version", "baseline")),
+        device=np.asarray(getattr(model, "device", "cpu")),
+        b11_processed_by_sen2sr=np.asarray(False),
     )
     output_root.joinpath("validation").mkdir(parents=True, exist_ok=True)
     output_root.joinpath("uncertainty").mkdir(parents=True, exist_ok=True)
@@ -230,30 +298,40 @@ def _run_pipeline(
         weights_json=np.asarray(json.dumps(uncertainty.weights)),
         label=np.asarray(uncertainty.label),
     )
-    abundance_name = "abundance_sample.npz" if sample_count is not None else "abundance.npz"
-    np.savez(
-        output_root / "abundance" / abundance_name,
-        S=abundance.S,
-        residual=np.asarray(abundance.residual),
-        endmember_names=np.asarray(abundance.endmember_names),
-        solver=np.asarray(abundance.solver),
-        sample_count=np.asarray(sample_count if sample_count is not None else -1),
-    )
+    if abundance is not None:
+        abundance_name = (
+            "abundance_sample.npz" if sample_count is not None else "abundance.npz"
+        )
+        np.savez(
+            output_root / "abundance" / abundance_name,
+            S=abundance.S,
+            residual=np.asarray(abundance.residual),
+            endmember_names=np.asarray(abundance.endmember_names),
+            solver=np.asarray(abundance.solver),
+            sample_count=np.asarray(sample_count if sample_count is not None else -1),
+        )
 
     metadata = RunMetadata(
         scene_id=str(original.meta.get("scene_id", "unknown")),
         aoi={"bounds": original.bounds, "crs": original.crs},
-        bands=list(original.band_names),
-        model_name=config.sr.model,
-        model_version="configured",
+        bands=list(fused.band_names),
+        model_name=str(getattr(model, "model_name", config.sr.model)),
+        model_version=str(getattr(model, "model_version", "baseline")),
         scale=config.sr.scale,
         fusion_params={"epsilon": config.fusion.epsilon, "alpha_min": config.fusion.alpha_min, "alpha_max": config.fusion.alpha_max},
         consistency_params={"iterations": config.consistency.iterations, "lambda": config.consistency.lambda_},
-        endmember_set="fixture" if fcls_sample_limit is not None else "configured",
+        endmember_set=(
+            "fixture" if fcls_sample_limit is not None
+            else "configured" if endmembers is not None
+            else "not_configured"
+        ),
         validation_settings={
             "reference_type": metrics.reference_type,
             "fcls_result": "sample" if sample_count is not None else "full",
             "fcls_sample_count": sample_count,
+            "unmixing_skipped": endmembers is None,
+            "source_bands": list(model_input_cube.band_names),
+            "b11_processed_by_sen2sr": False,
         },
         timestamp=datetime.now(timezone.utc).isoformat(),
         software_versions={"python": sys.version.split()[0], "numpy": np.__version__},

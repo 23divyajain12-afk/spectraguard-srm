@@ -34,5 +34,15 @@ must implement `SRModel.predict()` and be registered in
 `src/sr/model_adapter.py`; weights are supplied locally and are never
 downloaded automatically.
 
+The optional ESA OpenSR SEN2SR backend is selected with `sr.model: sen2sr`.
+Install its optional stack with `python -m pip install -r requirements-sen2sr.txt`.
+The adapter uses the official `opensr_model.SRLatentDiffusion` and
+`load_pretrained()` checkpoint mechanism from
+[ESAOpenSR/opensr-model](https://github.com/ESAOpenSR/opensr-model). It requires
+four channels in B02/B03/B04/B08 order; B11 is not passed to SEN2SR. Use
+`sr.device: auto` (CUDA when available, CPU otherwise), `sr.checkpoint`, and
+`sr.sampling_steps` in configuration. Missing dependencies or checkpoints fail
+explicitly; no fallback to the baseline occurs.
+
 The dashboard helpers in `src/app/dashboard.py` read the saved NPZ/JSON
 artifacts from `data/outputs/`.

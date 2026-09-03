@@ -1,0 +1,5 @@
+# Optional ESA OpenSR SEN2SR backend
+torch
+opensr-model
+omegaconf
+requests

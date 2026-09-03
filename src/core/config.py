@@ -36,6 +36,9 @@ class SRConfig:
     scale: int
     tile_size: int
     overlap: int
+    device: str = "auto"
+    checkpoint: str = ""
+    sampling_steps: int = 100
 
 
 @dataclass

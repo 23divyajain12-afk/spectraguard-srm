@@ -11,7 +11,10 @@ def build_spatial_input(
     if cube.data.ndim != 3 or cube.data.shape[0] == 0:
         raise ValueError("cube.data must have shape (bands, height, width)")
 
-    requested = list(config.data.bands)
+    if config.sr.model == "sen2sr":
+        requested = ["B02", "B03", "B04", "B08"]
+    else:
+        requested = list(config.data.bands)
     if requested:
         indices = []
         for band in requested:
@@ -40,7 +43,7 @@ def build_spatial_input(
         "min": minimum.tolist(),
         "max": maximum.tolist(),
     }
-    method = "pseudo_rgb" if len(indices) == 3 else "single_band"
+    method = "pseudo_rgb" if len(indices) in (3, 4) else "single_band"
     return SpatialRepresentation(
         array=array[0] if len(indices) == 1 else array,
         method=method,
