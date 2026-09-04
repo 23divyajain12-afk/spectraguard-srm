@@ -37,6 +37,10 @@ def prepare_endmembers(
         values = []
         for band in sensor_response.band_names:
             response = np.asarray(sensor_response.rsr[band], dtype=float)
+            if response.shape != grid.shape:
+                raise ValueError(
+                    f"Sensor response shape does not match wavelength grid for band {band}"
+                )
             denominator = np.trapezoid(response, grid)
             if denominator <= 0:
                 raise ValueError(f"Sensor response has no support for band {band}")

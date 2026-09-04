@@ -1,0 +1,10 @@
+# Add/merge these keys into config/default.yaml.
+library:
+  usgs:
+    enabled: true
+    manifest: data/raw/spectral_library/endmember_manifest.json
+    sensor_response: data/raw/sensor_response/COPE-GSEG-EOPG-TN-15-0007 - Sentinel-2 Spectral Response Functions 2024 - 4.0.xlsx
+    srf_sheet: "Spectral Responses (S2C)"
+    bands: [B02, B03, B04, B08, B11]
+    unknown_class: "Other / Unclassified"
+    strict_native_wavelengths: true

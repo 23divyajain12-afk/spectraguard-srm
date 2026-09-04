@@ -13,6 +13,10 @@ def load_sensor_response(path: str, band_names: List[str]) -> SensorResponse:
     response_path = Path(path)
     if not response_path.is_file():
         raise FileNotFoundError(f"Sensor response file does not exist: {response_path}")
+    if response_path.suffix.lower() in {".xlsx", ".xlsm"}:
+        from src.library.s2c_usgs_library import load_sensor_response as load_s2c_response
+
+        return load_s2c_response(str(response_path), band_names)
 
     if response_path.suffix.lower() == ".npz":
         with np.load(response_path, allow_pickle=False) as values:

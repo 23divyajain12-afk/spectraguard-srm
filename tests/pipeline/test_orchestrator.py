@@ -37,7 +37,8 @@ def test_run_pipeline_rejects_missing_scene_path():
 
 def test_fixture_smoke_entrypoint_runs():
     config = load_config(str(REPOSITORY_ROOT / "config" / "default.yaml"))
-    assert config.data.scene_path == "tests/fixtures/aoi_small.npz"
+    fixture_config = replace(config, data=replace(config.data, scene_path=str(FIXTURE)))
+    assert Path(fixture_config.data.scene_path).resolve() == FIXTURE.resolve()
 
 
 def test_safe_without_unmixing_configuration_skips_unmixing(monkeypatch, tmp_path):

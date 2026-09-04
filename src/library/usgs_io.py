@@ -33,6 +33,12 @@ def load_usgs_spectrum(path: str) -> RawSpectrum:
             except ValueError:
                 continue
     if len(rows) < 2:
+        from src.library.s2c_usgs_library import load_usgs_spectrum as load_asdfr_spectrum
+
+        try:
+            return load_asdfr_spectrum(str(spectrum_path))
+        except ValueError:
+            pass
         raise ValueError("Spectrum file must contain at least two numeric rows")
 
     values = np.asarray(rows, dtype=np.float32)

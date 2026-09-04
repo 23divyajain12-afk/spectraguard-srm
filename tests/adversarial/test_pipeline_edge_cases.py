@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -118,12 +119,12 @@ def test_crop_rejects_invalid_and_nonintersecting_aoi():
 
 
 def test_tiling_handles_nondivisible_and_oversized_tiles():
-    model = load_sr_model(CONFIG)
-    image = np.ones((3, 10, 13), dtype=np.float32)
+    model = load_sr_model(replace(CONFIG, sr=replace(CONFIG.sr, model="numpy_baseline")))
+    image = np.ones((4, 10, 13), dtype=np.float32)
     nondivisible = tiled_inference(model, image, tile_size=6, overlap=2)
     oversized = tiled_inference(model, image, tile_size=32, overlap=4)
-    assert nondivisible.shape == (3, 40, 52)
-    assert oversized.shape == (3, 40, 52)
+    assert nondivisible.shape == (4, 40, 52)
+    assert oversized.shape == (4, 40, 52)
     np.testing.assert_allclose(nondivisible, 1.0)
     np.testing.assert_allclose(oversized, 1.0)
 
