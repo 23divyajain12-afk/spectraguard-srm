@@ -33,4 +33,5 @@ data/interim/
 data/outputs/
 
 # Logs
-*.log
+*.logopensr-ldsrs2_v1_0_0.ckpt
+opensr-ldsrs2_v1_0_0.ckpt
