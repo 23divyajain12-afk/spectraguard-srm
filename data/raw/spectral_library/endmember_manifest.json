@@ -1,0 +1,87 @@
+{
+  "library": "USGS Spectral Library Version 7 splib07a",
+  "sensor": "Sentinel-2C MSI",
+  "srf_document": "COPE-GSEG-EOPG-TN-15-0007 - Sentinel-2 Spectral Response Functions 2024 - 4.0.xlsx",
+  "srf_sheet": "Spectral Responses (S2C)",
+  "bands": [
+    "B02",
+    "B03",
+    "B04",
+    "B08",
+    "B11"
+  ],
+  "usgs_bad_value": -1.23e+34,
+  "active_endmembers": [
+    {
+      "name": "asphalt_road",
+      "material_class": "asphalt",
+      "file": "a500b9f6-7382-4188-81da-7293bf040bce.txt",
+      "use": true
+    },
+    {
+      "name": "concrete",
+      "material_class": "concrete",
+      "file": "1d4e2b8c-1fe1-40e6-a45d-a7fade693fe0.txt",
+      "use": true
+    },
+    {
+      "name": "roofing_felt",
+      "material_class": "roofing",
+      "file": "7d9aa0b5-d9c3-4242-a2de-16d31ea10e6e.txt",
+      "use": true
+    },
+    {
+      "name": "sand",
+      "material_class": "sand",
+      "file": "e6e039b4-94a2-4fbb-9de4-1e6f7a3f51ce.txt",
+      "use": true
+    },
+    {
+      "name": "sheet_metal_galvanized",
+      "material_class": "metal",
+      "file": "c8152390-b1ba-4d0b-9245-d7375a23dee3.txt",
+      "use": true
+    },
+    {
+      "name": "grass_golden_dry",
+      "material_class": "dry_vegetation",
+      "file": "9e857cbc-2003-42af-88e1-0554153a5a29.txt",
+      "use": true
+    }
+  ],
+  "retained_but_not_active": [
+    {
+      "name": "lawn_grass_green",
+      "material_class": "green_vegetation",
+      "file": "f00dcb33-6e8d-4a85-8e28-25c3136a158f.txt",
+      "reason": "BECK spectrum; exact native BECK wavelength record is required before S2C convolution."
+    },
+    {
+      "name": "seawater_open_ocean",
+      "material_class": "water",
+      "file": "ef39d5bb-1fd8-4992-9a38-244d53bf1f66.txt",
+      "reason": "Open-ocean seawater is not a defensible freshwater representative for the Pune scene."
+    },
+    {
+      "name": "basalt_weathered",
+      "material_class": "rock_proxy",
+      "file": "246e14d4-9bd5-45ac-b60e-c72934dde1f3.txt",
+      "reason": "Weathered basalt is not automatically equivalent to generic local soil/rock."
+    },
+    {
+      "name": "asphalt_tar_roof",
+      "material_class": "roof_tar",
+      "file": "a47bb244-f732-4fae-8ea3-8ca5ed24cc9f.txt",
+      "reason": "Roof tar must not be mislabeled as road asphalt."
+    }
+  ],
+  "policy": {
+    "unknown_class": "Other / Unclassified",
+    "fcls_constraints": [
+      "abundance >= 0",
+      "sum(abundances) == 1"
+    ],
+    "sr_metrics_only": true,
+    "do_not_claim_fcls_ground_truth_validation": true
+  }
+}

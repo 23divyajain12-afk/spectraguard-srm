@@ -17,7 +17,11 @@ from src.data.sentinel_io import load_sentinel
 from src.fusion.bicubic import bicubic_upscale
 from src.fusion.detail_residual import extract_residual
 from src.fusion.spectral_injection import fuse_multispectral, run_safety_checks
-from src.library.endmember_preparation import prepare_endmembers
+from src.library.endmember_preparation import (
+    SEN2SR_BANDS,
+    prepare_endmembers,
+    select_endmember_bands,
+)
 from src.library.sensor_response import load_sensor_response
 from src.library.usgs_io import load_usgs_spectrum
 from src.sr.model_adapter import load_sr_model
@@ -29,6 +33,7 @@ from src.validation.uncertainty import estimate_uncertainty
 
 
 LOGGER = logging.getLogger(__name__)
+PIPELINE_STAGE_COUNT = 9
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = REPOSITORY_ROOT / "data" / "outputs"
@@ -67,9 +72,23 @@ def _load_endmembers(
             config.unmixing.sensor_response,
             list(config.data.bands) or ["B02", "B03", "B04", "B08", "B11"],
         )
-        return prepare_endmembers(spectra, response, config)
+        endmembers = prepare_endmembers(spectra, response, config)
+        if config.sr.model == "sen2sr":
+            return select_endmember_bands(
+                endmembers,
+                list(config.data.bands),
+                SEN2SR_BANDS,
+            )
+        return endmembers
     if scene_path.suffix.lower() == ".npz":
-        return _load_fixture_endmembers(scene_path)
+        endmembers = _load_fixture_endmembers(scene_path)
+        if config.sr.model == "sen2sr":
+            return select_endmember_bands(
+                endmembers,
+                ["B02", "B03", "B04", "B08", "B11"],
+                SEN2SR_BANDS,
+            )
+        return endmembers
     return None
 
 
@@ -145,6 +164,11 @@ def _make_fused_cube(cube: FusedCube, provenance: str) -> FusedCube:
     )
 
 
+def _log_stage(stage: int, message: str) -> None:
+    percentage = round(stage * 100 / PIPELINE_STAGE_COUNT)
+    LOGGER.info("[%3d%%] [%d/%d] %s...", percentage, stage, PIPELINE_STAGE_COUNT, message)
+
+
 def _select_rgb_nir_cube(cube: SentinelCube) -> SentinelCube:
     required = ["B02", "B03", "B04", "B08"]
     missing = [band for band in required if band not in cube.band_names]
@@ -172,33 +196,42 @@ def _run_pipeline(
     output_root: Path,
     fcls_sample_limit: Optional[int] = None,
 ) -> RunMetadata:
-    LOGGER.info("[1/9] Loading Sentinel-2")
+    LOGGER.info("[  0%] Pipeline starting")
+    _log_stage(1, "Loading Sentinel-2")
     aoi = config.data.aoi.as_bbox() if config.data.aoi is not None else None
     original = load_sentinel(str(scene_path), config, aoi_bbox=aoi)
     original = _align_configured_geometry(original)
-    LOGGER.info("[2/9] Preprocessing")
+    _log_stage(2, "Preprocessing")
     original = preprocess(original, config)
     model_input_cube = (
         _select_rgb_nir_cube(original)
         if config.sr.model == "sen2sr"
         else original
     )
-    LOGGER.info("[3/9] Bicubic baseline")
+    _log_stage(3, "Bicubic baseline")
     bicubic = bicubic_upscale(model_input_cube, config.sr.scale)
 
     spatial_input = build_spatial_input(original, config)
-    LOGGER.info("[4/9] SEN2SR inference" if config.sr.model == "sen2sr"
-                else "[4/9] SR inference")
+    _log_stage(4, "SEN2SR inference" if config.sr.model == "sen2sr" else "SR inference")
     model = load_sr_model(config)
+    tile_progress = None
+    if config.sr.model == "sen2sr":
+        LOGGER.info("SEN2SR inference started")
+
+        def tile_progress(completed: int, total: int) -> None:
+            LOGGER.info("SEN2SR tiles: %d/%d", completed, total)
+
     spatial_hr = tiled_inference(
-        model, spatial_input.array, config.sr.tile_size, config.sr.overlap
+        model,
+        spatial_input.array,
+        config.sr.tile_size,
+        config.sr.overlap,
+        progress_callback=tile_progress,
     )
     if config.sr.model == "sen2sr":
         residual = extract_residual(spatial_hr, bicubic.data)
-        LOGGER.info(
-            "[5/9] Spectral fusion (preserving four-channel SEN2SR RGB-NIR; "
-            "B11 not processed by SEN2SR)"
-        )
+        _log_stage(5, "Spectral fusion (preserving four-channel SEN2SR RGB-NIR; "
+                     "B11 not processed by SEN2SR)")
         fused = FusedCube(
             data=spatial_hr,
             band_names=list(model_input_cube.band_names),
@@ -224,7 +257,7 @@ def _run_pipeline(
         spatial_base = np.mean(bicubic.data[: spatial_hr.shape[0]], axis=0)
         spatial_hr_channel = np.mean(spatial_hr, axis=0)
         residual = extract_residual(spatial_hr_channel, spatial_base)
-        LOGGER.info("[5/9] Spectral fusion")
+        _log_stage(5, "Spectral fusion")
         fused = fuse_multispectral(bicubic, spatial_base, spatial_hr_channel, config)
         fused = run_safety_checks(fused, config)
         fused = _make_fused_cube(
@@ -232,17 +265,17 @@ def _run_pipeline(
             f"{getattr(model, 'model_name', config.sr.model)}+{fused.provenance}",
         )
         validation_cube = original
-    LOGGER.info("[6/9] Measurement consistency")
+    _log_stage(6, "Measurement consistency")
     fused = project_to_measurement_consistency(fused, validation_cube, config)
-    LOGGER.info("[7/9] Validation")
+    _log_stage(7, "Validation")
     metrics = evaluate(fused, validation_cube, None, config)
-    LOGGER.info("[8/9] Uncertainty")
+    _log_stage(8, "Uncertainty")
     uncertainty = estimate_uncertainty(fused, metrics, config)
 
     sample_count = None
     abundance = None
     if endmembers is not None:
-        LOGGER.info("[9/9] FCLS unmixing")
+        _log_stage(9, "FCLS unmixing")
         fcls_cube = fused
         if fcls_sample_limit is not None:
             valid_rows, valid_cols = np.where(fused.mask)
@@ -252,10 +285,7 @@ def _run_pipeline(
             fcls_cube = replace(fused, mask=sample_mask)
         abundance = fcls(fcls_cube, endmembers, config)
     else:
-        LOGGER.info(
-            "[9/9] FCLS unmixing / skipped: no endmember/sensor-response "
-            "configuration supplied."
-        )
+        LOGGER.info("[100%] FCLS unmixing skipped (not configured)")
 
     _save_cube(original, output_root / "validation" / "original.npz")
     _save_cube(bicubic, output_root / "bicubic" / "bicubic.npz")
@@ -352,6 +382,7 @@ def _run_pipeline(
     )
     _save_metadata(metadata, output_root / "reports" / "run_metadata.json")
     LOGGER.info("Artifact writing complete: %s", output_root)
+    LOGGER.info("[100%] Pipeline complete")
     return metadata
 
 

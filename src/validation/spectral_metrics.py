@@ -28,7 +28,12 @@ def compute_band_errors(pred: SentinelCube, ref: SentinelCube) -> Dict[str, floa
     """Return mask-aware per-band RMSE values."""
     if pred.data.shape != ref.data.shape:
         raise ValueError("prediction and reference cubes must have matching shapes")
+    if pred.band_names != ref.band_names:
+        raise ValueError("prediction and reference bands must match in order")
+    if pred.mask.shape != pred.data.shape[1:] or ref.mask.shape != ref.data.shape[1:]:
+        raise ValueError("cube masks must match their spatial dimensions")
     mask = pred.mask & ref.mask
+    mask &= np.all(np.isfinite(pred.data), axis=0) & np.all(np.isfinite(ref.data), axis=0)
     if not np.any(mask):
         raise ValueError("no valid pixels available for band errors")
     errors = {}

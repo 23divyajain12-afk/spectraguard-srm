@@ -1,10 +1,16 @@
+from typing import Callable, Optional
+
 import numpy as np
 
 from src.core.schemas import SRModel
 
 
 def tiled_inference(
-    model: SRModel, image: np.ndarray, tile_size: int, overlap: int
+    model: SRModel,
+    image: np.ndarray,
+    tile_size: int,
+    overlap: int,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> np.ndarray:
     """Run SR inference over overlapping tiles and average their overlaps."""
     array = np.asarray(image, dtype=np.float32)
@@ -16,6 +22,8 @@ def tiled_inference(
     channels = array[None, ...] if array.ndim == 2 else array
     height, width = channels.shape[-2:]
     step = tile_size - overlap
+    total_tiles = len(range(0, height, step)) * len(range(0, width, step))
+    completed_tiles = 0
     output = None
     weights = None
     for row in range(0, height, step):
@@ -41,6 +49,9 @@ def tiled_inference(
             out_col = round(col * scale_x)
             output[:, out_row:out_row + predicted.shape[1], out_col:out_col + predicted.shape[2]] += predicted
             weights[out_row:out_row + predicted.shape[1], out_col:out_col + predicted.shape[2]] += 1
+            completed_tiles += 1
+            if progress_callback is not None:
+                progress_callback(completed_tiles, total_tiles)
 
     if output is None or weights is None or np.any(weights == 0):
         raise ValueError("tiled inference produced incomplete output")

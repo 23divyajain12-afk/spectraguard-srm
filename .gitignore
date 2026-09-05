@@ -29,8 +29,30 @@ Thumbs.db
 
 # Generated / local data
 data/raw/
+data/raw/*
 data/interim/
 data/outputs/
+
+# Reproducible S2C/USGS integration assets
+!data/raw/
+!data/raw/sensor_response/
+data/raw/sensor_response/*
+!data/raw/sensor_response/COPE-GSEG-EOPG-TN-15-0007 - Sentinel-2 Spectral Response Functions 2024 - 4.0.xlsx
+!data/raw/spectral_library/
+data/raw/spectral_library/*
+!data/raw/spectral_library/endmember_manifest.json
+!data/raw/spectral_library/selected_usgs/
+data/raw/spectral_library/selected_usgs/*
+!data/raw/spectral_library/selected_usgs/1d4e2b8c-1fe1-40e6-a45d-a7fade693fe0.txt
+!data/raw/spectral_library/selected_usgs/246e14d4-9bd5-45ac-b60e-c72934dde1f3.txt
+!data/raw/spectral_library/selected_usgs/7d9aa0b5-d9c3-4242-a2de-16d31ea10e6e.txt
+!data/raw/spectral_library/selected_usgs/9e857cbc-2003-42af-88e1-0554153a5a29.txt
+!data/raw/spectral_library/selected_usgs/a47bb244-f732-4fae-8ea3-8ca5ed24cc9f.txt
+!data/raw/spectral_library/selected_usgs/a500b9f6-7382-4188-81da-7293bf040bce.txt
+!data/raw/spectral_library/selected_usgs/c8152390-b1ba-4d0b-9245-d7375a23dee3.txt
+!data/raw/spectral_library/selected_usgs/e6e039b4-94a2-4fbb-9de4-1e6f7a3f51ce.txt
+!data/raw/spectral_library/selected_usgs/ef39d5bb-1fd8-4992-9a38-244d53bf1f66.txt
+!data/raw/spectral_library/selected_usgs/f00dcb33-6e8d-4a85-8e28-25c3136a158f.txt
 
 # Logs
 *.logopensr-ldsrs2_v1_0_0.ckpt
