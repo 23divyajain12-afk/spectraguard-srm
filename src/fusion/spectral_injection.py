@@ -19,22 +19,49 @@ def fuse_multispectral(
     config: RunConfig,
 ) -> FusedCube:
     """Inject controlled spatial detail into the bicubic multispectral cube."""
-    base = _spatial_channel(np.asarray(spatial_base, dtype=np.float32))
-    high_resolution = _spatial_channel(np.asarray(spatial_hr, dtype=np.float32))
-    if base.shape != high_resolution.shape or base.shape != bicubic_cube.data.shape[1:]:
+    base_array = np.asarray(spatial_base, dtype=np.float32)
+    high_array = np.asarray(spatial_hr, dtype=np.float32)
+    independent = (
+        base_array.ndim == 3
+        and high_array.ndim == 3
+        and base_array.shape == high_array.shape
+        and base_array.shape[0] == bicubic_cube.data.shape[0]
+    )
+    if independent:
+        if base_array.shape[1:] != bicubic_cube.data.shape[1:]:
+            raise ValueError("spatial inputs must match the bicubic cube grid")
+        base = base_array
+        high_resolution = high_array
+    else:
+        base = _spatial_channel(base_array)
+        high_resolution = _spatial_channel(high_array)
+    if base.shape[-2:] != high_resolution.shape[-2:] or base.shape[-2:] != bicubic_cube.data.shape[1:]:
         raise ValueError("spatial inputs must match the bicubic cube grid")
     detail = high_resolution - base
-    variance = float(np.var(base))
-    if variance <= 0:
-        alpha = np.zeros(bicubic_cube.data.shape[0], dtype=np.float32)
-    else:
+    if independent:
+        variance = np.var(base, axis=(1, 2))
         alpha = np.array(
-            [np.cov(band.ravel(), base.ravel(), bias=True)[0, 1] / (variance + config.fusion.epsilon)
-             for band in bicubic_cube.data],
+            [
+                np.cov(band.ravel(), base[index].ravel(), bias=True)[0, 1]
+                / (variance[index] + config.fusion.epsilon)
+                if variance[index] > 0
+                else 0.0
+                for index, band in enumerate(bicubic_cube.data)
+            ],
             dtype=np.float32,
         )
+    else:
+        variance = float(np.var(base))
+        if variance <= 0:
+            alpha = np.zeros(bicubic_cube.data.shape[0], dtype=np.float32)
+        else:
+            alpha = np.array(
+                [np.cov(band.ravel(), base.ravel(), bias=True)[0, 1] / (variance + config.fusion.epsilon)
+                 for band in bicubic_cube.data],
+                dtype=np.float32,
+            )
     alpha = np.clip(alpha, config.fusion.alpha_min, config.fusion.alpha_max)
-    data = bicubic_cube.data + alpha[:, None, None] * detail[None, ...]
+    data = bicubic_cube.data + alpha[:, None, None] * detail
     data[:, ~bicubic_cube.mask] = bicubic_cube.data[:, ~bicubic_cube.mask]
     data = np.clip(data, 0.0, 1.0).astype(np.float32)
     alpha_map = np.broadcast_to(alpha[:, None, None], data.shape).copy()

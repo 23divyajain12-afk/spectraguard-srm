@@ -46,3 +46,9 @@ explicitly; no fallback to the baseline occurs.
 
 The dashboard helpers in `src/app/dashboard.py` read the saved NPZ/JSON
 artifacts from `data/outputs/`.
+
+Validation metrics compare the degraded fused product with the original 10m
+Sentinel-2 observation and are reported as internal consistency measurements,
+not 2.5m ground-truth accuracy. A future validation workflow should add an
+independent high-resolution reference or Wald-protocol assessment; the main
+pipeline intentionally does not require either dataset.

@@ -40,3 +40,36 @@ def test_sen2sr_spatial_input_excludes_b11():
     representation = build_spatial_input(cube, config)
     assert representation.source_bands == ["B02", "B03", "B04", "B08"]
     assert representation.array.shape[0] == 4
+
+
+def test_sen2sr_spatial_input_preserves_reflectance_contract():
+    config = load_config("config/default.yaml")
+    config.sr.model = "sen2sr"
+    data = np.array(
+        [
+            [[0.1, 0.2], [0.3, 0.4]],
+            [[0.2, 0.3], [0.4, 0.5]],
+            [[0.3, 0.4], [0.5, 0.6]],
+            [[0.4, 0.5], [0.6, 0.7]],
+            [[0.8, 0.8], [0.8, 0.8]],
+        ],
+        dtype=np.float32,
+    )
+    cube = SentinelCube(
+        data=data,
+        band_names=["B02", "B03", "B04", "B08", "B11"],
+        crs="EPSG:32643",
+        transform=(10, 0, 0, 0, -10, 0),
+        resolution_m=10,
+        bounds=(0, 0, 20, 20),
+        mask=np.ones((2, 2), dtype=bool),
+    )
+
+    representation = build_spatial_input(cube, config)
+
+    np.testing.assert_array_equal(representation.array, data[:4])
+    assert representation.normalization == {
+        "method": "opensr_v1_reflectance",
+        "input_range": [0.0, 1.0],
+        "conversion": "identity_after_reflectance_clip",
+    }
