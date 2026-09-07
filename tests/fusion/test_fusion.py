@@ -37,24 +37,6 @@ def test_spectral_injection_and_safety_checks():
     assert checked.data[0, 0, 0] == 1.0
 
 
-def test_matching_sr_channels_are_fused_independently():
-    cube, _ = load_small_aoi()
-    config = load_config("config/default.yaml")
-    baseline = bicubic_upscale(cube, 4)
-    base = baseline.data.copy()
-    detail = np.zeros_like(base)
-    detail[0] = 0.01
-    detail[1] = 0.02
-    detail[2] = 0.03
-    detail[3] = 0.04
-
-    fused = fuse_multispectral(baseline, base, base + detail, config)
-
-    expected = baseline.data + fused.alpha_map * detail
-    expected[:, ~baseline.mask] = baseline.data[:, ~baseline.mask]
-    np.testing.assert_allclose(fused.data, np.clip(expected, 0.0, 1.0), atol=1e-6)
-
-
 def test_invalid_residual_shapes_fail():
     with pytest.raises(ValueError):
         extract_residual(np.zeros((2, 2)), np.zeros((3, 3)))

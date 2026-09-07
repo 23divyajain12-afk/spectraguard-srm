@@ -55,12 +55,7 @@ def evaluate(
     reference: Optional[SentinelCube],
     config: RunConfig,
 ) -> ValidationMetrics:
-    """Measure internal consistency against the original observation.
-
-    The original 10m cube is not high-resolution ground truth. Independent
-    high-resolution-reference or Wald-protocol accuracy belongs in a future
-    validation workflow.
-    """
+    """Evaluate the degraded HR result against the original observation."""
     predicted = degrade(hr_cube, config).predicted
     if predicted.band_names != original_cube.band_names:
         raise ValueError("degraded prediction and original bands must match in order")

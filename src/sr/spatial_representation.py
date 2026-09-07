@@ -31,30 +31,18 @@ def build_spatial_input(
     if not np.any(valid):
         raise ValueError("Cannot normalize a cube with no valid pixels")
 
-    if config.sr.model == "sen2sr":
-        # OpenSR v1 SEN2SR expects physical L2A reflectance in [0, 1]. Its
-        # official config disables the legacy [-1, 1] normalization, so do
-        # not replace scene reflectance with per-band min-max values.
-        array = np.clip(array, 0.0, 1.0)
-        normalization = {
-            "method": "opensr_v1_reflectance",
-            "input_range": [0.0, 1.0],
-            "conversion": "identity_after_reflectance_clip",
-        }
-    else:
-        minimum = array[:, valid].min(axis=1)
-        maximum = array[:, valid].max(axis=1)
-        scale = np.where(maximum > minimum, maximum - minimum, 1.0)
-        array = np.clip(
-            (array - minimum[:, None, None]) / scale[:, None, None],
-            0.0,
-            1.0,
-        )
-        normalization = {
-            "method": "scene_band_minmax",
-            "min": minimum.tolist(),
-            "max": maximum.tolist(),
-        }
+    minimum = array[:, valid].min(axis=1)
+    maximum = array[:, valid].max(axis=1)
+    scale = np.where(maximum > minimum, maximum - minimum, 1.0)
+    array = np.clip(
+        (array - minimum[:, None, None]) / scale[:, None, None],
+        0.0,
+        1.0,
+    )
+    normalization = {
+        "min": minimum.tolist(),
+        "max": maximum.tolist(),
+    }
     method = "pseudo_rgb" if len(indices) in (3, 4) else "single_band"
     return SpatialRepresentation(
         array=array[0] if len(indices) == 1 else array,
