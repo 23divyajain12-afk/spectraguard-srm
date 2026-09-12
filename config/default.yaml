@@ -6,20 +6,21 @@ data:
   target_resolution_m: 2.5
   working_resolution_m: 10
   scene_path: data/raw/S2C_MSIL2A_20260831T052641_N0512_R105_T43QCA_20260831T102215.SAFE
+
   aoi:
-    minx: 300000
-    miny: 2094880
-    maxx: 305120
-    maxy: 2100000
+    minx: 320000
+    miny: 2075000
+    maxx: 325120
+    maxy: 2080120
 
 sr:
   model: sen2sr
   scale: 4
-  tile_size: 256
+  tile_size: 64
   overlap: 32
-  device: auto
+  device: cuda
   checkpoint: opensr-ldsrs2_v1_0_0.ckpt
-  sampling_steps: 100
+  sampling_steps: 20
 
 fusion:
   epsilon: 1e-8

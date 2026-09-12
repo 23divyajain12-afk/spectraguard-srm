@@ -74,6 +74,10 @@ GENERATED_PLOTS = {
     "ground_detail_comparison": "Ground Detail Structure Comparison",
     "ground_detail_comparison_nir": "NIR Band High-Frequency Detail (B08)",
     "ground_detail_true_color": "True Color Ground Detail (B04/B03/B02)",
+    "publication_quality_comparison": "Publication-Grade 10m vs 2.5m Comparison",
+    "original_vs_spectraguard_detail": "High-Frequency Detail & Edge Gradients",
+    "original_vs_spectraguard_wide": "Full Scene 10m vs 2.5m Comparison",
+    "new_area_comparison": "AOI Overview Structural Comparison",
 }
 
 WAVELENGTHS = {
@@ -336,7 +340,7 @@ def _stretch(array):
     return np.clip(scaled, 0, 255).astype(np.uint8)
 
 
-def as_png(rgb) -> bytes:
+def as_png(rgb, resample=None) -> bytes:
     try:
         from PIL import Image
 
@@ -345,7 +349,8 @@ def as_png(rgb) -> bytes:
         if max_dim > 1024:
             scale = 1024.0 / max_dim
             new_size = (max(1, int(image.width * scale)), max(1, int(image.height * scale)))
-            image = image.resize(new_size, Image.Resampling.BILINEAR)
+            r_mode = resample if resample is not None else Image.Resampling.BILINEAR
+            image = image.resize(new_size, r_mode)
         buffer = io.BytesIO()
         image.save(buffer, format="PNG", optimize=True)
         return buffer.getvalue()
@@ -377,12 +382,12 @@ def _scientific_colormap(normalized) -> object:
     return np.dstack([r.astype(np.uint8), g.astype(np.uint8), b.astype(np.uint8)])
 
 
-def _rgb_preview(role: str, mode: str = "rgb") -> bytes:
+def _rgb_preview(role: str, mode: str = "rgb", crop: bool = False) -> bytes:
     path = artifact(role)
     if path is None:
         raise FileNotFoundError(f"{role} artifact unavailable")
     mtime = path.stat().st_mtime
-    cache_key = (f"rgb:{role}:{mode}", mtime)
+    cache_key = (f"rgb:{role}:{mode}:{1 if crop else 0}", mtime)
     if cache_key in _IMAGE_CACHE:
         return _IMAGE_CACHE[cache_key]
 
@@ -390,6 +395,20 @@ def _rgb_preview(role: str, mode: str = "rgb") -> bytes:
 
     data, bands = _npz_data(role)
     array = np.asarray(data, dtype=np.float32)
+
+    if crop:
+        is_10m = role == "input" or array.shape[-1] == 512 or (array.ndim == 3 and array.shape[1] == 512)
+        if array.ndim == 2:
+            if is_10m:
+                array = array[338:402, 100:164]
+            else:
+                array = array[338 * 4 : 402 * 4, 100 * 4 : 164 * 4]
+        elif array.ndim == 3:
+            if is_10m:
+                array = array[:, 338:402, 100:164]
+            else:
+                array = array[:, 338 * 4 : 402 * 4, 100 * 4 : 164 * 4]
+
     if array.ndim == 2:
         channels = [array] * 3
     elif array.ndim == 3:
@@ -410,9 +429,65 @@ def _rgb_preview(role: str, mode: str = "rgb") -> bytes:
     else:
         raise ValueError("Artifact image array has unsupported dimensions")
 
-    png_bytes = as_png(np.dstack([_stretch(channel) for channel in channels]))
+    rgb = np.dstack([_stretch(channel) for channel in channels])
+
+    resample_mode = None
+    if role == "input":
+        from PIL import Image
+
+        rgb = np.repeat(np.repeat(rgb, 4, axis=0), 4, axis=1)
+        resample_mode = Image.Resampling.NEAREST
+
+    png_bytes = as_png(rgb, resample=resample_mode)
     _IMAGE_CACHE[cache_key] = png_bytes
     return png_bytes
+
+
+def _slider_crop(role: str) -> bytes:
+    is_before = role in ("before", "input")
+    target_role = "input" if is_before else "spectraguard"
+    path = artifact(target_role)
+    if path is None:
+        raise FileNotFoundError(f"{role} slider artifact unavailable")
+    mtime = path.stat().st_mtime
+    cache_key = (f"slider:{role}", mtime)
+    if cache_key in _IMAGE_CACHE:
+        return _IMAGE_CACHE[cache_key]
+
+    import numpy as np
+
+    data, bands = _npz_data(target_role)
+    array = np.asarray(data, dtype=np.float32)
+
+    if is_before:
+        crop = array[:, 338:402, 100:164]
+    else:
+        crop = array[:, 338 * 4 : 402 * 4, 100 * 4 : 164 * 4]
+
+    if bands and all(b in bands for b in ("B04", "B03", "B02")):
+        channels = [crop[bands.index(b)] for b in ("B04", "B03", "B02")]
+    elif crop.shape[0] >= 3:
+        channels = [crop[2], crop[1], crop[0]]
+    else:
+        raise ValueError("Crop array does not have required RGB bands")
+
+    def _stretch_1_99(ch):
+        valid = ch[np.isfinite(ch) & (ch > 0)]
+        if not valid.size:
+            return np.zeros(ch.shape, dtype=np.uint8)
+        low, high = np.percentile(valid, (1, 99))
+        span = max(float(high - low), 1e-6)
+        scaled = (ch - low) * 255.0 / span
+        return np.clip(scaled, 0, 255).astype(np.uint8)
+
+    rgb = np.dstack([_stretch_1_99(c) for c in channels])
+    if is_before:
+        rgb = np.repeat(np.repeat(rgb, 4, axis=0), 4, axis=1)
+
+    png_bytes = as_png(rgb)
+    _IMAGE_CACHE[cache_key] = png_bytes
+    return png_bytes
+
 
 
 def _map_preview(role: str) -> bytes:
@@ -1836,11 +1911,11 @@ def generate_single_page_app(current_route: str) -> bytes:
 
     swipe_curtain = (
         f'<div class="swipe-container" id="swipe-box">'
-        f'<span class="swipe-badge-left">Original Sentinel-2 (10m)</span>'
-        f'<span class="swipe-badge-right">SpectraGuard Fused (2.5m)</span>'
-        f'<img src="/result/spectraguard.png" class="swipe-after" alt="SpectraGuard Fused">'
+        f'<span class="swipe-badge-left">Native Sentinel-2 (10m Pixels)</span>'
+        f'<span class="swipe-badge-right">SpectraGuard Super-Resolution (2.5m)</span>'
+        f'<img src="/slider/after.png" class="swipe-after" alt="SpectraGuard Fused">'
         f'<div class="swipe-before-wrapper" id="swipe-before-wrap">'
-        f'<img src="/result/input.png" class="swipe-before" alt="Original Input">'
+        f'<img src="/slider/before.png" class="swipe-before" alt="Original Input">'
         f'</div>'
         f'<div class="swipe-handle" id="swipe-handle">'
         f'<div class="swipe-circle">◄ ►</div>'
@@ -1888,14 +1963,15 @@ def generate_single_page_app(current_route: str) -> bytes:
     comparison = "".join(
         f'<div class="card">'
         f'<small>{title}</small>'
-        f'<img src="/result/{role}.png" alt="{title}" onclick="openLightbox(\'/result/{role}.png\')">'
+        f'<span class="chip" style="margin:4px 0 8px;font-weight:700">{badge}</span>'
+        f'<img src="/result/{role}.png?crop=1" alt="{title}" onclick="openLightbox(\'/result/{role}.png?crop=1\')">'
         f'<strong style="font-size:14px;margin-top:6px">{"Available" if artifact(role) else "Not available"}</strong>'
         f'</div>'
-        for role, title in (
-            ("input", "Original"),
-            ("bicubic", "Bicubic"),
-            ("sen2sr", "SEN2SR"),
-            ("spectraguard", "SpectraGuard"),
+        for role, title, badge in (
+            ("input", "Original", "10m GSD (Raw Detector)"),
+            ("bicubic", "Bicubic", "2.5m GSD (Interpolated)"),
+            ("sen2sr", "SEN2SR", "2.5m GSD (Spatial Prior)"),
+            ("spectraguard", "SpectraGuard", "2.5m GSD (Analytic Fusion)"),
         )
     )
     maps = '<div class="grid-cards" style="grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));">'
@@ -1915,9 +1991,30 @@ def generate_single_page_app(current_route: str) -> bytes:
     maps += "</div>"
 
     ground_plots = ""
-    for plot_key in ("ground_detail_comparison", "ground_detail_true_color", "ground_detail_comparison_nir"):
-        if (OUTPUTS / f"{plot_key}.png").is_file():
-            title = GENERATED_PLOTS.get(plot_key, plot_key)
+    seen_plots = set()
+    preferred_order = [
+        "publication_quality_comparison",
+        "original_vs_spectraguard_detail",
+        "original_vs_spectraguard_wide",
+        "new_area_comparison",
+        "ground_detail_comparison",
+        "ground_detail_true_color",
+        "ground_detail_comparison_nir",
+    ]
+
+    if OUTPUTS.is_dir():
+        for p in sorted(OUTPUTS.glob("*.png")):
+            key = p.stem
+            if key not in ("comparison", "comparison_stretched") and key not in preferred_order:
+                preferred_order.append(key)
+
+    for plot_key in preferred_order:
+        if plot_key in seen_plots:
+            continue
+        plot_path = OUTPUTS / f"{plot_key}.png"
+        if plot_path.is_file():
+            seen_plots.add(plot_key)
+            title = GENERATED_PLOTS.get(plot_key, plot_key.replace("_", " ").title())
             ground_plots += (
                 f'<div class="plot-card">'
                 f'<h3><span>{title}</span>'
@@ -1926,6 +2023,9 @@ def generate_single_page_app(current_route: str) -> bytes:
                 f'<img src="/output_plot/{plot_key}.png" alt="{title}" onclick="openLightbox(\'/output_plot/{plot_key}.png\')">'
                 f'</div>'
             )
+
+    if not ground_plots:
+        ground_plots = '<p class="muted" style="margin-top:12px">No ground detail plot figures found in data/outputs. Run plot scripts to generate visual comparison figures.</p>'
 
     view_analysis = (
         f'<div id="view-analysis" class="app-view {"active" if current_route == "/analysis" else ""}">'
@@ -2098,6 +2198,10 @@ class Handler(BaseHTTPRequestHandler):
                 y = float(params.get("y", [0.5])[0])
                 body = json.dumps(sample_pixel_spectrum(x, y)).encode("utf-8")
                 kind = "application/json"
+            elif route == "/slider/before.png":
+                body, kind = _slider_crop("before"), "image/png"
+            elif route == "/slider/after.png":
+                body, kind = _slider_crop("after"), "image/png"
             elif route.startswith("/result/") and route.endswith(".png"):
                 name = route[8:-4]
                 if "_" in name:
@@ -2109,7 +2213,9 @@ class Handler(BaseHTTPRequestHandler):
 
                 if role not in ("input", "bicubic", "sen2sr", "spectraguard") or artifact(role) is None:
                     raise FileNotFoundError()
-                body, kind = _rgb_preview(role, mode), "image/png"
+                crop_param = params.get("crop", ["0"])[0]
+                crop = crop_param in ("1", "true")
+                body, kind = _rgb_preview(role, mode, crop=crop), "image/png"
             elif route.startswith("/map/") and route.endswith(".png"):
                 role = route[5:-4]
                 if role not in ("sam_map", "uncertainty") or artifact(role) is None:
